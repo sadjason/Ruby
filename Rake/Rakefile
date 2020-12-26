@@ -1,0 +1,142 @@
+# frozen_string_literal: true
+
+require 'yaml'
+
+PROJECT_PATH = '/Users/zhangwei/BDCodes/calendar-ios'
+
+class String
+  def red;    "\e[31m#{self}\e[0m" end
+  def green;  "\e[36m#{self}\e[0m" end
+  def blue;   "\e[34m#{self}\e[0m" end
+end
+
+# 获取当前 version
+task :version do
+  ver_s = read_version_file
+  puts "current version: #{ver_s}".blue
+end
+
+################################################################################
+# Version Files                                                                #
+################################################################################
+
+# 更新 alpha 版本，两种使用姿势：
+#   1. `rake alpha`. 基于当前的 version 升级
+#     eg: 3.40.0 -> 3.40.0-alpha.0
+#     eg: 3.40.0-alpha.0 -> 3.40.0-alpha.1
+#   2. `rake alpha version={version}`. 指定 alpha 版本
+#     eg: rake alpha version=3.41.0-alpha.0
+task :alpha do
+  alpha_regex = /^alpha\.([0-9]+)$/
+  file_name = PROJECT_PATH + '/Bizs/version'
+  env_param = ENV['version']
+  if !env_param.nil? && !env_param.empty?
+    ver_s = env_param
+    unless Version.valid?(ver_s)
+      puts "版本号 `#{ver_s}` 不符合 semantic version 规范".red
+      exit(0)
+    end
+    v = Version.new(ver_s)
+    unless v.pre_release.nil? == false && v.pre_release.empty? == false && alpha_regex =~ v.pre_release
+      puts "版本号 `#{ver_s}` 没有以 `-alpha.x` 结尾".red
+      exit(0)
+    end
+    update_podspec(ver_s)
+    write_version_file(ver_s)
+  else
+    old_ver_s = read_version_file
+    v = Version.new(old_ver_s)
+    ver_s = ''
+    if v.pre_release.nil? || v.pre_release.empty? || alpha_regex !~ v.pre_release
+      ver_s = "#{v.major}.#{v.minor}.#{v.patch}-alpha.0"
+    else
+      alpha_regex =~ v.pre_release
+      alpha_num = Integer($1) + 1
+      ver_s = "#{v.major}.#{v.minor}.#{v.patch}-alpha.#{alpha_num}"
+    end
+    update_podspec(ver_s)
+    write_version_file(ver_s)
+  end
+end
+
+################################################################################
+# Version Files                                                                #
+################################################################################
+
+VERSION_FILE_NAME = PROJECT_PATH + '/Bizs/version'
+
+def read_version_file
+  unless File.exist?(VERSION_FILE_NAME)
+    puts "#{VERSION_FILE_NAME} not exists".red
+    exit(0)
+  end
+  ver_s = File.read(VERSION_FILE_NAME)
+  unless !ver_s.nil? && !ver_s.empty?
+    puts "content in #{VERSION_FILE_NAME} should not be empty".red
+  end
+  unless Version.valid?(ver_s)
+    puts "content in #{VERSION_FILE_NAME} should not be invalid".red
+  end
+  ver_s
+end
+
+def write_version_file(ver_s)
+  old_ver_s = read_version_file
+  File.write(VERSION_FILE_NAME, ver_s)
+  puts "update version succeed. #{old_ver_s} -> #{ver_s}".blue
+end
+
+def update_podspec(ver_s)
+  Dir.glob("#{PROJECT_PATH}/Bizs/**/*.podspec").each do |path|
+    podspec = File.open(path).read
+    version = podspec[/s\.version\s*=\s*['"]([^'"]+)['"]/, 1]
+    File.write(path, podspec.sub!(version, ver_s))
+  end
+end
+
+################################################################################
+# Version Class                                                                #
+################################################################################
+
+# semantic version
+class Version
+  # 参考：https://regexr.com/39s32
+  @@regex = /^((([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)$/
+
+  def self.regex
+    @@regex
+  end
+
+  def self.valid?(str)
+    return true if regex =~ str
+    return false
+  end
+
+  def to_s
+    str = "major: #{major}, minor: #{minor}, patch: #{patch}"
+    str += ", pre_release: #{pre_release}" unless pre_release.nil?
+    str += ", build_meta: #{build_meta}" unless build_meta.nil?
+    str
+  end
+
+  attr_accessor :major, :minor, :patch, :pre_release, :build_meta
+
+  def initialize(str = '1.2.3')
+    Version.regex =~ str
+    @major = $3
+    @minor = $4
+    @patch = $5
+    @pre_release = $6
+    @build_meta = $7
+  end
+end
+
+task :test do
+  puts Version.new('1.1.1')
+  puts Version.new('1.0.0-alpha')
+  puts Version.new('1.0.0-alpha.1')
+  puts Version.new('1.0.0-0.3.7')
+  puts Version.new('1.0.0-x.7.z.92')
+  puts Version.new('1.0.0-alpha+001')
+  puts Version.new('1.0.0+20130313144700')
+end
